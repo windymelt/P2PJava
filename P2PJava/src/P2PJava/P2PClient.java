@@ -11,7 +11,7 @@ class P2PClient /*extends Thread*/ {
 	
 	P2PClient(String hostname, int port) throws MalformedURLException {
 		java.net.URL serverURL  = new java.net.URL("http://" + hostname + ":" + port + "/xmlrpc");
-	  System.out.println("Making client connection: " + serverURL.toString());
+	  //System.out.println("Making client connection: " + serverURL.toString());
 	  client = new XmlRpcClient();
 	  config = new XmlRpcClientConfigImpl();
 	  config.setServerURL(serverURL);

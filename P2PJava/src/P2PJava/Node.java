@@ -13,7 +13,7 @@ public class Node {
 	// pingを受け付ける。Base64-encodedの自己IDを返す。
 	public String ping() {
 		String idBase64 = Base64.encode(chord.getInstance().selfID.idVal);
-		System.out.println("Pingを受信しました: ノード名は " + idBase64);
+		//System.out.println("Pingを受信しました: ノード名は " + idBase64);
 		return idBase64;
 	}
 
@@ -23,17 +23,21 @@ public class Node {
 		// CCW <= |XaaaaaaaaAbbbbbbbbBccCddddddddDeeEF...xxx| => CW
 		// 自己のノードlIDとクエリIDを比較し、等しければ自己のidAddressを返す。
 		// 　等しくなければ、
-		// 　Succussessorと自己のIDとの距離(Pとする)、クエリIDと自己のIDとの距離（Qとする）を比較し、
+		// 　Successorと自己のIDとの距離(Pとする)、クエリIDと自己のIDとの距離（Qとする）を比較し、
 		// P>QならばSuccessorノードがクエリIDの担当者であるから、SuccessorにwhoAreYouを送信し、その返り値を自己の返り値とする。
 		// P<Qならば自己の知り得る限りではクエリIDの担当者はいないから、Successorに処理を委譲し、回答を待つ。
 		System.out.println("findNodeを受信:" + queryID);
-
+		
 		if (chord.getInstance().selfID.getBase64().equals(queryID)) { // 「あ、それ僕です」
+			System.out.println("IT'S ME!");
 			return new idAddress(chord.getInstance().selfID,
 					chord.getInstance().selfHostName,
 					chord.getInstance().selfPort);
 		}
-
+		
+		/*
+		 * 距離測定
+		 */
 		BigInteger self_succ = nodeID.distance(chord.getInstance().selfID,
 				chord.getInstance().succList.first().IDval);
 		BigInteger self_query = nodeID.distance(
@@ -44,10 +48,10 @@ public class Node {
 		int succPort = chord.getInstance().succList.first().getPort();
 		P2PClient successor = new P2PClient(succHostname, succPort);
 
-		System.out.println("距離差モード: " + self_query.compareTo(self_succ));
-
-		// 自分が孤独の場合は無条件に自分を返す
+/*		System.out.println("距離差モード: " + self_query.compareTo(self_succ));
+*/
 		if (self_query.compareTo(self_succ) <= 0
+				// ↓自分が孤独の場合は無条件に自分を返す
 				|| chord.getInstance().selfID.idVal == chord.getInstance().succList
 						.first().IDval.idVal) {
 			System.out.println("次のノードが該当ノードです");
@@ -65,14 +69,14 @@ public class Node {
 
 	// 自分のノード+アドレス情報を返す。
 	public idAddress whoAreYou() {
-		System.out.println("whoAreYouを受信");
+		//System.out.println("whoAreYouを受信");
 		return new idAddress(chord.getInstance().selfID,
 				chord.getInstance().selfHostName, chord.getInstance().selfPort);
 	}
 
 	// 自分のPredecessorを返す。
 	public idAddress yourPredecessor(String dummy) throws MalformedURLException {
-		System.out.println("yourPredecessorを受信");
+		//System.out.println("yourPredecessorを受信");
 
 		if (chord.getInstance().predID != null) {
 			if (!chord.getInstance().stabilizerIsOn) {
@@ -110,7 +114,7 @@ public class Node {
 	}
 
 	public idAddress yourSuccessor(String dummy) {
-		System.out.println("yourSuccessorを受信");
+		//System.out.println("yourSuccessorを受信");
 		return new idAddress(chord.getInstance().succList.first().getID(),
 				chord.getInstance().succList.first().getHostname(),
 				chord.getInstance().succList.first().getPort());
@@ -118,21 +122,28 @@ public class Node {
 
 	// 自分のPredecessorが正当か確認させる。
 	public boolean amIPredecessor(idAddress id) {
-		System.out.println("amIPredecessorを受信");
+		//System.out.println("amIPredecessorを受信");
 		return chord.getInstance().checkPredecessor(id); // chord
 	}
 
 	public byte[] getChunk(byte[] id) {
+		System.out.println("Data loading.. : " + Base64.encode(id));
+		if (chord.getInstance().dataHolderValue.data.isEmpty()) {
+			System.out.println("Empty"); } else { System.out.println("not empty");}
 		if (chord.getInstance().dataHolderValue.containsKey(id)) {
+			System.out.println("Found.");
 			byte[] answer = chord.getInstance().dataHolderValue.get(id);
 			return answer;
 		} else {
+			System.out.println("Not Found.");
 			return null;
 		}
 	}
 	
-	public void putChunk(byte[] id, byte[] value) {
+	public byte[] setChunk(byte[] id, byte[] value) throws DecodingException {
+		System.out.println("Data Accepted: " + Base64.encode(id));
 		chord.getInstance().dataHolderValue.put(id, value);
+		return id;
 	}
 
 }

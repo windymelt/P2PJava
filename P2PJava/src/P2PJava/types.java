@@ -3,6 +3,8 @@ package P2PJava;
 import java.math.BigInteger;
 import java.io.Serializable;
 import java.util.LinkedHashMap;
+import java.util.Map;
+
 import org.apache.ws.commons.util.Base64;
 
 /**
@@ -45,12 +47,12 @@ class nodeID implements Serializable {
 
 	// 円形空間における距離を測定する。
 	static BigInteger distance(nodeID id1, nodeID id2) {
-		BigInteger x = new BigInteger(id1.getArray());
-		BigInteger y = new BigInteger(id2.getArray());
-		if (x.subtract(y).abs().compareTo(new BigInteger("2").pow(159)) < 0) {
-			return x.subtract(y).abs()/* .mod(CHORDSIZE) */;
+		BigInteger x = new BigInteger(1, id1.getArray());
+		BigInteger y = new BigInteger(1, id2.getArray());
+		if (x.subtract(y).abs().compareTo(new BigInteger("2").pow(159)) <= 0) {
+			return x.subtract(y).mod(CHORDSIZE).abs()/* .mod(CHORDSIZE) */;
 		} else {
-			return new BigInteger("2").pow(160).subtract(x.subtract(y).abs())/*
+			return new BigInteger("2").pow(160).subtract(x.subtract(y).mod(CHORDSIZE).abs())/*
 																			 * .mod
 																			 * (
 																			 * CHORDSIZE
@@ -93,25 +95,42 @@ class idList implements Serializable {
 	LinkedHashMap<nodeID, hostPair> idListVal = new LinkedHashMap<nodeID, hostPair>();
 
 	idAddress first() {
-		nodeID firstID = idListVal.keySet().iterator().next();
-		hostPair firstPair = idListVal.values().iterator().next();
+		//System.out.println(idListVal.keySet().toArray()[0]);
+		//System.out.println(idListVal.entrySet().toArray()[0]);
+		/*nodeID firstID = idListVal.keySet().iterator().next();
+		hostPair firstPair = idListVal.values().iterator().next();*/
+		nodeID firstID = (nodeID)(idListVal.keySet().toArray()[0]);
+		hostPair firstPair = ((Map.Entry<nodeID, hostPair>)idListVal.entrySet().toArray()[0]).getValue();
+
 		return new idAddress(firstID, firstPair.getHost(), firstPair.getPort());
 	}
 	idAddress second() {
-		idListVal.keySet().iterator().next();
+		if (idListVal.size() > 1) {
+		/*idListVal.keySet().iterator().next();
 		idListVal.values().iterator().next();
 		nodeID secondID = idListVal.keySet().iterator().next();
-		hostPair secondPair = idListVal.values().iterator().next();
+		hostPair secondPair = idListVal.values().iterator().next();*/
+		nodeID secondID = (nodeID)(idListVal.keySet().toArray()[1]);
+		hostPair secondPair = ((Map.Entry<nodeID, hostPair>)idListVal.entrySet().toArray()[1]).getValue();
 		return new idAddress(secondID, secondPair.getHost(), secondPair.getPort());
+		} else {
+			return first();
+		}
 	}
 	idAddress third() {
-		idListVal.keySet().iterator().next();
+		if (idListVal.size() > 2) {
+		/*idListVal.keySet().iterator().next();
 		idListVal.values().iterator().next();
 		idListVal.keySet().iterator().next();
 		idListVal.values().iterator().next();
 		nodeID thirdID = idListVal.keySet().iterator().next();
-		hostPair thirdPair = idListVal.values().iterator().next();
+		hostPair thirdPair = idListVal.values().iterator().next();*/
+		nodeID thirdID = (nodeID)(idListVal.keySet().toArray()[2]);
+		hostPair thirdPair = ((Map.Entry<nodeID, hostPair>)idListVal.entrySet().toArray()[2]).getValue();
 		return new idAddress(thirdID, thirdPair.getHost(), thirdPair.getPort());
+		} else {
+			return second();
+		}
 	}
 	void add(nodeID id, String hostname, int port) {
 		idListVal.put(id, new hostPair(hostname, port));

@@ -1,9 +1,12 @@
 package P2PJava;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Scanner;
 import java.net.MalformedURLException;
 import java.net.UnknownHostException;
 
+import org.apache.ws.commons.util.Base64;
+import org.apache.ws.commons.util.Base64.DecodingException;
 import org.apache.xmlrpc.XmlRpcException;
 
 public class P2PJava {
@@ -13,8 +16,9 @@ public class P2PJava {
 	 * @throws NoSuchAlgorithmException 
 	 * @throws UnknownHostException 
 	 * @throws XmlRpcException 
+	 * @throws DecodingException 
 	 */
-	public static void main(String[] args) throws MalformedURLException, NoSuchAlgorithmException, UnknownHostException, XmlRpcException {
+	public static void main(String[] args) throws MalformedURLException, NoSuchAlgorithmException, UnknownHostException, XmlRpcException, DecodingException {
 		// TODO Auto-generated method stub
 		int serverport;
 		
@@ -45,6 +49,31 @@ public class P2PJava {
 	    	// パラメータが3あればjoinしてみる
 	    	chord.getInstance().join(new hostPair(args[1], Integer.parseInt(args[2])));
 	    }
-	
+	    
+	    Scanner in = new Scanner(System.in);
+	    String str;
+	    String[] arguments;
+	    while(true) {
+	    System.out.println("何か入力してEnterキーを押してください。：");
+	    str = in.nextLine();
+	    arguments = str.split(" ");
+	    System.out.println(str);
+	    switch (arguments[0]) {
+	    case "find":
+	    	System.out.println("finding " + arguments[1]);
+	    	System.out.println(new Node().findNode(arguments[1]).IDval.getBase64());
+	    	break;
+	    case "save":
+	    	System.out.println("あなたは "+arguments[1]+" を入力しました。");
+		    System.out.println(Base64.encode(chord.getInstance().saveData("moko", arguments[1].getBytes())));
+		    break;
+	    case "load":
+	    	System.out.println(arguments[1]+" をロードします。");
+		    String responseStr = new String(chord.getInstance().loadData(Base64.decode(arguments[1])));
+		    System.out.println(responseStr);
+		    break;
+	    }
+	    
+	    }
 	}
 }

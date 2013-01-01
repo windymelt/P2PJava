@@ -2,10 +2,13 @@ package P2PJava;
 
 import java.math.BigInteger;
 import java.net.MalformedURLException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Timer;
 import java.util.TimerTask;
 
 import org.apache.ws.commons.util.Base64;
+import org.apache.ws.commons.util.Base64.DecodingException;
 import org.apache.xmlrpc.XmlRpcException;
 
 public class chord {
@@ -47,14 +50,14 @@ public class chord {
 		System.out.println("スタビライザタイマを起動中");
 		TimerTask stabilize = new stabilizeSuccessor();
 		Timer stabilizeTimer = new Timer("Stabilizer timer");
-		stabilizeTimer.schedule(stabilize, 1000, 30 * 1000);
+		stabilizeTimer.schedule(stabilize, 1000, 10 * 1000);
 	}
 
 	// P2Pネットワークに参加する。参加の踏み台にする、任意の、このプログラムが稼動しているホストのhostPairを引数に取る。成功したらtrueを返す。
 	// まず踏み台にアプローチし、自分のノードIDが担当すべきエリアを現在担当しているノード（前任者）の情報を入手する。
 	// 前任者のノード情報を入手したら、SuccessorListに登録。この際、前のSuccessorListの情報は無意味になるので破棄しておく。
 	// Successorスタビライザを起動し、処理を終了する。
-	boolean join(hostPair connectTo) throws MalformedURLException {
+	synchronized boolean join(hostPair connectTo) throws MalformedURLException {
 		System.out.println("chord instance: join: " + connectTo.getHost() + ":"
 				+ connectTo.getPort());
 
@@ -87,7 +90,7 @@ public class chord {
 			return false;
 		}
 		if (!stabilizerIsOn)
-			chord.getInstance().startStabilizer();
+			{chord.getInstance().startStabilizer();}
 		System.out.println("Joinに成功しました");
 		return true;
 	}
@@ -102,16 +105,13 @@ public class chord {
 	// CAUTION: 初期状態ではPred/SuccともにSelfを参照していることに留意されたし
 	// TODO:　異常ノードの切断処理を追加されたし
 	synchronized void stabilizeSuccessor() throws MalformedURLException {
-		System.out.println("スタビライザ稼動");
-		System.out.println("My Succ: "
-				+ chord.getInstance().succList.first().IDval.getBase64());
-		System.out
-				.println("My Pred: " + chord.getInstance().predID.getBase64());
+		//System.out.println("スタビライザ稼動");
 		/*
 		 * もしSuccessorがSelfの場合は処理を中断する
 		 */
-		if (chord.getInstance().succList.first().IDval.idVal == selfID.idVal)
+		if (chord.getInstance().succList.first().IDval.idVal == selfID.idVal) {
 			return;
+		}
 		/*
 		 * Successorが参照しているPredecessorを取得する
 		 */
@@ -126,8 +126,8 @@ public class chord {
 			hisPred = (idAddress) cliSucc
 					.execute("Node.yourPredecessor", param);
 
-			System.out.println("SuccessorによるProdecessorを受信: "
-					+ hisPred.getID().getBase64());
+			// System.out.println("SuccessorによるProdecessorを受信: "
+			// + hisPred.getID().getBase64());
 		} catch (XmlRpcException e) {
 			// 受信不可能の場合、代替ノードに接続を変更する。
 			// まずはsuccListを走査し、空ならばpredに接続し自然に回復させる。
@@ -135,10 +135,16 @@ public class chord {
 			System.out.println("Successorに接続できません");
 			// succListの状態により処理を変更
 			System.out.println("Successorを破棄");
-			succList.remove1st();
-			if (succList.isEmpty()) {
-				System.out.println("SuccessorをPredecessorに移行");
-				succList.add(predID, predAddress);
+			/*
+			 * succList.remove1st(); if (succList.isEmpty()) {
+			 * System.out.println("SuccessorをPredecessorに移行");
+			 * succList.add(predID, predAddress); }
+			 */
+			if (succList.count()>1) {
+				System.out.println(succList.second().hostval + ":" + succList.second().portval + "に再接続");
+				join(succList.second().getHostPair());
+			} else {
+				join(predAddress);
 			}
 			// ここで処理を中断する
 			return;
@@ -147,8 +153,8 @@ public class chord {
 		nodeID hisPredID = hisPred.getID();
 		nodeID mySuccID = succList.first().getID();
 
-		System.out.println("HisPredのID: " + hisPredID.getBase64());
-		System.out.println("SelfのID: " + selfID.getBase64());
+		// System.out.println("HisPredのID: " + hisPredID.getBase64());
+		// System.out.println("SelfのID: " + selfID.getBase64());
 
 		if (hisPredID.getBase64().equals(selfID.getBase64())) {
 			// Successorの参照するPredecessorがSelfのIDと等しいとき（異常なし）
@@ -185,40 +191,37 @@ public class chord {
 		/*
 		 * succListは常に3ノード確保する
 		 */
-		if (succList.count() < 3) {
-			P2PClient cliSuccSucc = new P2PClient(succList.second()
-					.getHostname(), succList.second().getPort());
-			Object[] nullParam = { null };
+		// if (succList.count() < 3) {
+//------		
+		System.out.println("\nSuccListの補完開始");
+		idAddress successor = succList.first();
+		System.out.println("1st: " + successor.IDval.getBase64() + " @ " + successor.hostval + ":" + successor.portval);
+		System.out.println("2nd: " + succList.second().IDval.getBase64() + " @ " + succList.second().hostval + ":" + succList.second().portval);
 
-			switch (succList.count()) {
-			case 1:
-				try {
-					succList.add((idAddress) cliSucc.execute(
-							"Node.yourPredecessor", nullParam));
-				} catch (XmlRpcException e) {
-					// TODO 自動生成された catch ブロック
-					System.out.println(e.getMessage());
-				}
-				try {
-					succList.add((idAddress) cliSuccSucc.execute(
-							"Node.yourPredecessor", nullParam));
-				} catch (XmlRpcException e) {
-					// TODO 自動生成された catch ブロック
-					System.out.println(e.getMessage());
-				}
-				
-				break;
-			case 2:
-				try {
-					succList.add((idAddress) cliSuccSucc.execute(
-							"Node.yourPredecessor", nullParam));
-				} catch (XmlRpcException e) {
-					// TODO 自動生成された catch ブロック
-					System.out.println(e.getMessage());
-				}
-			}
+		P2PClient cliSuccSucc = new P2PClient(succList.second().getHostname(),
+				succList.second().getPort());
+		Object[] nullParam = { null };
+		succList.clear();
+		succList.add(successor);
+
+		try {
+			succList.add((idAddress) cliSucc.execute("Node.yourSuccessor",
+					nullParam));
+		} catch (XmlRpcException e) {
+			// TODO 自動生成された catch ブロック
+			System.out.println(e.getMessage());
 		}
+		try {
+			succList.add((idAddress) cliSuccSucc.execute(
+					"Node.yourSuccessor", nullParam));
+		} catch (XmlRpcException e) {
+			// TODO 自動生成された catch ブロック
+			System.out.println(e.getMessage());
+		}
+//------
 	}
+
+	// }
 
 	// 自分のPredecessorと告知されたIDのどちらが正当（ほとんどの場合告知されたIDが正当）か確認する。
 	// 告知されたIDが距離的に近い場合、自分のPredecessorを破棄して告知されたIDに書き換える。
@@ -231,5 +234,87 @@ public class chord {
 		predAddress = saidIDAddress.getHostPair();
 
 		return true;
+	}
+
+	byte[] saveData(String title, byte[] value)
+			throws NoSuchAlgorithmException, MalformedURLException,
+			DecodingException, XmlRpcException {
+
+		metaData meta = new metaData(title, value);
+		System.out.println(meta.toString());
+		/*
+		 * for (int i = 0; i > value.length; i += 1024) { if (i + 1024 >
+		 * value.length) { splitedData[i] = new String(value).substring(i, i +
+		 * 1024); } else { splitedData[i] = new String(value).substring(i,
+		 * value.length - 1); } }
+		 */
+		for (int i = 0; i < meta.chunks.length; i++) {
+			Node nd = new Node();
+			idAddress addr = nd.findNode(Base64
+					.encode(meta.checksum_Chunk_SHA1[i]));
+			P2PClient cliNode = new P2PClient(addr.getHostname(),
+					addr.getPort());
+			byte[][] param = new byte[2][];
+			param[0] = meta.checksum_Chunk_SHA1[i];
+			param[1] = meta.chunks[i].getBytes();
+			cliNode.execute("Node.setChunk", param);
+		}
+		Node nd = new Node();
+		MessageDigest md = MessageDigest.getInstance("SHA-1");
+		md.update(meta.toString().getBytes());
+		idAddress addr = nd.findNode(Base64.encode(md.digest()));
+		P2PClient cliNode = new P2PClient(addr.getHostname(), addr.getPort());
+		byte[][] param = new byte[2][];
+		param[0] = md.digest();
+		param[1] = meta.toString().getBytes();
+		cliNode.execute("Node.setChunk", param);
+		return md.digest();
+	}
+
+	byte[] loadData(byte[] key) throws MalformedURLException,
+			DecodingException, XmlRpcException {
+		Node nd = new Node();
+		idAddress addr = nd.findNode(Base64.encode(key));
+		P2PClient cliNode = new P2PClient(addr.getHostname(), addr.getPort());
+		byte[][] param = new byte[1][];
+		param[0] = key;
+		String meta = ((byte[]) cliNode.execute("Node.getChunk", param))
+				.toString();
+		if (meta == null)
+			return null;
+
+		String[] splitedMeta = meta.split("\n");
+		String filename = splitedMeta[0];
+		String checksum = splitedMeta[1];
+		int size = Integer.parseInt(splitedMeta[2]);
+		int count = Integer.parseInt(splitedMeta[3]);
+		String[] chunks = new String[count];
+		for (int i = 0; i < count; i++) {
+			chunks[i] = splitedMeta[i + 4];
+		}
+
+		byte[][] data = new byte[count][];
+		for (int i = 0; i < count; i++) {
+			;
+			addr = nd.findNode(Base64.encode(key));
+			cliNode = new P2PClient(addr.getHostname(), addr.getPort());
+			param = new byte[1][];
+			param[0] = chunks[i].getBytes();
+			data[i] = (byte[]) cliNode.execute("Node.getChunk", param);
+			if (data[i] == null)
+				return null;
+		}
+
+		byte[] finalData = new byte[size];
+		for (int i = 0; i < count; i++) {
+			if (i == count) {
+				System.arraycopy(data, 0, finalData, i * 1024, size
+						- (count - 1) * 1024);
+			} else {
+				System.arraycopy(data, 0, finalData, i * 1024, 1024);
+			}
+		}
+
+		return finalData;
 	}
 }
