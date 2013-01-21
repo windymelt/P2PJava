@@ -6,18 +6,29 @@ import org.apache.ws.commons.util.Base64;
 import org.apache.ws.commons.util.Base64.DecodingException;
 import org.apache.xmlrpc.XmlRpcException;
 
-
 public class Node {
 
 	// var connectingNode: Array[Float] = null;
 	// pingを受け付ける。Base64-encodedの自己IDを返す。
 	public String ping() {
-		String idBase64 = Base64.encode(chord.getInstance().selfID.idVal);
-		//System.out.println("Pingを受信しました: ノード名は " + idBase64);
-		return idBase64;
+		return chord.getInstance().self.getID().getBase64();
 	}
-
-	public idAddress findNode(String queryID) throws MalformedURLException,
+public idAddress findNode(String queryID) throws DecodingException, MalformedURLException, XmlRpcException {
+	final nodeID id_query = new nodeID(queryID);
+	final nodeID id_self = chord.getInstance().self.getID();
+	final nodeID id_succ = chord.getInstance().succManager.first().getID();
+	
+	if (id_self.equals(id_query)) {
+		return chord.getInstance().getSelfIdAddress();
+	}
+	if (nodeID.belongs(id_query, id_self, id_succ)) {
+		P2PClient cli_succ = chord.getInstance().succManager.first().getClient(); 
+		return cli_succ.whoAreYou();
+	} else {
+		return chord.getInstance().succManager.nearestNeighbor(id_query).getClient().findNode(id_query);
+	}
+}
+	public idAddress findNode_old(String queryID) throws MalformedURLException,
 			XmlRpcException, DecodingException {
 		// あるChord空間上の位置から時計回りに巡り、最初に遭遇したノードが担当ノードである。
 		// CCW <= |XaaaaaaaaAbbbbbbbbBccCddddddddDeeEF...xxx| => CW
@@ -26,110 +37,101 @@ public class Node {
 		// 　Successorと自己のIDとの距離(Pとする)、クエリIDと自己のIDとの距離（Qとする）を比較し、
 		// P>QならばSuccessorノードがクエリIDの担当者であるから、SuccessorにwhoAreYouを送信し、その返り値を自己の返り値とする。
 		// P<Qならば自己の知り得る限りではクエリIDの担当者はいないから、Successorに処理を委譲し、回答を待つ。
+		final nodeID id_queryID = new nodeID(queryID);
+		final nodeID id_self = chord.getInstance().self.getID();
+
 		System.out.println("findNodeを受信:" + queryID);
-		
-		if (chord.getInstance().selfID.getBase64().equals(queryID)) { // 「あ、それ僕です」
+
+		if (id_self.equals(id_queryID)) { // 「あ、それ僕です」
 			System.out.println("IT'S ME!");
-			return new idAddress(chord.getInstance().selfID,
-					chord.getInstance().selfHostName,
-					chord.getInstance().selfPort);
+			return chord.getInstance().getSelfIdAddress();
 		}
-		
+
+		final idAddress addr_firstSucc = chord.getInstance().succManager.first();
 		/*
 		 * 距離測定
 		 */
-		BigInteger self_succ = nodeID.distance(chord.getInstance().selfID,
-				chord.getInstance().succList.first().IDval);
-		BigInteger self_query = nodeID.distance(
-				new nodeID(Base64.decode(queryID)), chord.getInstance().selfID);
+		final BigInteger distance_self_succ, distance_self_query;
+		distance_self_succ = nodeID.distance(id_self, addr_firstSucc.IDval);
+		distance_self_query = nodeID.distance(id_queryID, id_self);
 
-		String succHostname = chord.getInstance().succList.first()
-				.getHostname();
-		int succPort = chord.getInstance().succList.first().getPort();
-		P2PClient successor = new P2PClient(succHostname, succPort);
+		final P2PClient cli_successor = addr_firstSucc.getClient();
 
-/*		System.out.println("距離差モード: " + self_query.compareTo(self_succ));
-*/
-		if (self_query.compareTo(self_succ) <= 0
-				// ↓自分が孤独の場合は無条件に自分を返す
-				|| chord.getInstance().selfID.idVal == chord.getInstance().succList
-						.first().IDval.idVal) {
+		System.out.println("self-succ間の距離: " + distance_self_succ.toString());
+		System.out.println("self-query間の距離: " + distance_self_query.toString());
+		System.out.println("差: "
+				+ distance_self_query.subtract(distance_self_succ));
+		try {
+			Thread.sleep(1000);
+		} catch (InterruptedException e) {
+			// TODO 自動生成された catch ブロック
+			e.printStackTrace();
+		}
+		
+		if (distance_self_query.compareTo(distance_self_succ) <= 0
+				|| distance_self_succ.compareTo(BigInteger.ZERO) == 0/*id_self.equals(addr_firstSucc.getID())*/) {
 			System.out.println("次のノードが該当ノードです");
-			nodeID[] nullarray = new nodeID[0];
-			return (idAddress) successor.execute("Node.whoAreYou", nullarray);
+			return (idAddress) cli_successor.execute("Node.whoAreYou");
 		} else {
 			System.out.println("メッセージを転送 => "
-					+ chord.getInstance().succList.first().IDval.getBase64());
-			String[] param = new String[1];
-			param[0] = queryID;
-			System.out.println("param: " + param[0]);
-			return (idAddress) successor.execute("Node.findNode", param);
+					+ addr_firstSucc.IDval.getBase64());
+			System.out.println("param: " + queryID);
+			return (idAddress) cli_successor.execute("Node.findNode", queryID);
 		}
 	}
 
+
 	// 自分のノード+アドレス情報を返す。
 	public idAddress whoAreYou() {
-		//System.out.println("whoAreYouを受信");
-		return new idAddress(chord.getInstance().selfID,
-				chord.getInstance().selfHostName, chord.getInstance().selfPort);
+		System.out.println("whoAreYouを受信");
+		return chord.getInstance().self.clone();
 	}
 
 	// 自分のPredecessorを返す。
-	public idAddress yourPredecessor(String dummy) throws MalformedURLException {
-		//System.out.println("yourPredecessorを受信");
+	public idAddress yourPredecessor() throws MalformedURLException {
+		// System.out.println("yourPredecessorを受信");
 
-		if (chord.getInstance().predID != null) {
-			if (!chord.getInstance().stabilizerIsOn) {
+		if (chord.getInstance().pred != null) {
+			
 				chord.getInstance().startStabilizer();
-				chord.getInstance().stabilizerIsOn = true;
-			}
-			if (chord.getInstance().selfID.idVal == chord.getInstance().succList
-					.first().IDval.idVal) {
-				chord.getInstance().succList.clear();
-				chord.getInstance().succList.add(chord.getInstance().predID,
-						chord.getInstance().predAddress);
-			}
+
+		
 			// predecessorが生きてるか確認する
-			P2PClient cliPred = new P2PClient(
-					chord.getInstance().predAddress.getHost(),
-					chord.getInstance().predAddress.getPort());
-			Object[] nullParam = new Object[0];
-			// nullParam[0] = null;
 			try {
-				cliPred.execute("Node.ping", nullParam);
+				chord.getInstance().pred.getClient().execute("Node.ping");
 				// ping成功、相手は生きてる
-				return new idAddress(chord.getInstance().predID,
-						chord.getInstance().predAddress.getHost(),
-						chord.getInstance().predAddress.getPort());
+				return chord.getInstance().pred.clone();
 			} catch (XmlRpcException e) {
 				// ping失敗、相手は死んでる
 				// e.printStackTrace();
-				return new idAddress(chord.getInstance().selfID,
-						chord.getInstance().selfHostName,
-						chord.getInstance().selfPort);
+				return null;
 			}
 		} else {
 			return null; // neg
 		}
 	}
 
-	public idAddress yourSuccessor(String dummy) {
-		//System.out.println("yourSuccessorを受信");
-		return new idAddress(chord.getInstance().succList.first().getID(),
-				chord.getInstance().succList.first().getHostname(),
-				chord.getInstance().succList.first().getPort());
+	public idAddress yourSuccessor() {
+		// System.out.println("yourSuccessorを受信");
+		return new idAddress(chord.getInstance().succManager.first().getID(),
+				chord.getInstance().succManager.first().getHostname(),
+				chord.getInstance().succManager.first().getPort());
 	}
 
 	// 自分のPredecessorが正当か確認させる。
-	public boolean amIPredecessor(idAddress id) {
-		//System.out.println("amIPredecessorを受信");
+	public boolean amIPredecessor(idAddress id_obj) {
+		// System.out.println("amIPredecessorを受信");
+		idAddress id = (idAddress) id_obj;
 		return chord.getInstance().checkPredecessor(id); // chord
 	}
 
 	public byte[] getChunk(byte[] id) {
 		System.out.println("Data loading.. : " + Base64.encode(id));
 		if (chord.getInstance().dataHolderValue.data.isEmpty()) {
-			System.out.println("Empty"); } else { System.out.println("not empty");}
+			System.out.println("Empty");
+		} else {
+			System.out.println("not empty");
+		}
 		if (chord.getInstance().dataHolderValue.containsKey(id)) {
 			System.out.println("Found.");
 			byte[] answer = chord.getInstance().dataHolderValue.get(id);
@@ -139,7 +141,7 @@ public class Node {
 			return null;
 		}
 	}
-	
+
 	public byte[] setChunk(byte[] id, byte[] value) throws DecodingException {
 		System.out.println("Data Accepted: " + Base64.encode(id));
 		chord.getInstance().dataHolderValue.put(id, value);

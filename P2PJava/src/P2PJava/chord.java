@@ -1,6 +1,5 @@
 package P2PJava;
 
-import java.math.BigInteger;
 import java.net.MalformedURLException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -14,14 +13,11 @@ import org.apache.xmlrpc.XmlRpcException;
 public class chord {
 	private static final chord instance = new chord(); // インスタンス。static
 														// getInstance()でアクセス可能。
-	nodeID selfID = null; // 自己のnodeID
-	String selfHostName = null; // 自己のホスト名
-	int selfPort = 0; // 自己のサーバのポート番号
-	idList succList = new idList(); // 複数のSuccessorを格納する。現在実装では[0]のみを使用。
-	idList fingerList = new idList(); // 複数のfingerを格納する。現在実装では使用しない。
-	nodeID predID = null; // 単一のpredecessorのIDを格納する。
-	hostPair predAddress = null; // 単一のpredecessorのアドレス情報を格納する。
-									// TODO:上の変数とともにidAddressにすればいいのではないか
+	idAddress self = null;
+	IdManager succManager = new IdManager(); // 複数のSuccessorを格納する。現在実装では[0]のみを使用。
+	IdManager fingerManager = new IdManager(); // 複数のfingerを格納する。現在実装では使用しない。
+	idAddress pred = null;
+	Timer stabilizeTimer = null;
 	boolean stabilizerIsOn = false;
 	dataHolder dataHolderValue = new dataHolder();
 
@@ -36,61 +32,55 @@ public class chord {
 	// 初期化メソッド。起動時に必ず実行しなければならない。self関連の情報を代入し、初期のSuccessorを自己に設定する
 	void init(nodeID ID, String host, int port) {
 		System.out.println("Chordを初期化します");
-		selfID = ID;
-		selfHostName = host;
-		selfPort = port;
-		succList.add(selfID, selfHostName, selfPort);
-		predID = selfID;
-		predAddress = new hostPair(selfHostName, selfPort);
+		self = new idAddress(ID, host, port);
+		succManager.add(self);
+		pred = null;
+	}
 
+	private void sleepForRandom() {
+		try {
+			Thread.sleep((long) (Math.random() * 100));
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
 	}
 
 	public void startStabilizer() {
 		// 定期的にSuccessorを更新するスレッドを起動する
+		if (stabilizerIsOn) {
+			return;
+		}
 		System.out.println("スタビライザタイマを起動中");
+		sleepForRandom();
 		TimerTask stabilize = new stabilizeSuccessor();
-		Timer stabilizeTimer = new Timer("Stabilizer timer");
+		stabilizeTimer = new Timer("Stabilizer timer");
 		stabilizeTimer.schedule(stabilize, 1000, 10 * 1000);
+		stabilizerIsOn = true;
 	}
-
+	public void stopStabilizer() {
+		if (!stabilizerIsOn) {
+			return;
+		}
+		System.out.println("スタビライザタイマを停止中");
+		stabilizeTimer.cancel();
+		stabilizerIsOn = false;
+	}
 	// P2Pネットワークに参加する。参加の踏み台にする、任意の、このプログラムが稼動しているホストのhostPairを引数に取る。成功したらtrueを返す。
 	// まず踏み台にアプローチし、自分のノードIDが担当すべきエリアを現在担当しているノード（前任者）の情報を入手する。
 	// 前任者のノード情報を入手したら、SuccessorListに登録。この際、前のSuccessorListの情報は無意味になるので破棄しておく。
 	// Successorスタビライザを起動し、処理を終了する。
-	synchronized boolean join(hostPair connectTo) throws MalformedURLException {
+	synchronized boolean join(hostPair connectTo) throws MalformedURLException, XmlRpcException {
 		System.out.println("chord instance: join: " + connectTo.getHost() + ":"
 				+ connectTo.getPort());
 
-		P2PClient client = new P2PClient(connectTo.getHost(),
-				connectTo.getPort());
-		String[] param = { Base64.encode(selfID.getArray()) };
-		// System.out.println(param);
-		idAddress receivedSuccessor;
-		try {
-			receivedSuccessor = (idAddress) client.execute("Node.findNode",
-					param);
-		} catch (XmlRpcException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-			return false;
-		} // =>
-			// (Array[Byte],
-			// String)
-		succList.clear();
-		succList.add(receivedSuccessor.getID(),
-				receivedSuccessor.getHostname(), receivedSuccessor.getPort());
-		try {
-			client = new P2PClient(succList.first().getHostname(), succList
-					.first().getPort());
-			idAddress[] param2 = { new idAddress(selfID, selfHostName, selfPort) };
-			client.execute("Node.amIPredecessor", param2);
-		} catch (XmlRpcException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-			return false;
-		}
-		if (!stabilizerIsOn)
-			{chord.getInstance().startStabilizer();}
+			idAddress addr_receivedSucc = connectTo.getClient().findNode(
+					self.getID());
+			succManager.clear();
+			succManager.add(addr_receivedSucc);
+			pred = null;
+
+
+		chord.getInstance().startStabilizer();
 		System.out.println("Joinに成功しました");
 		return true;
 	}
@@ -104,121 +94,92 @@ public class chord {
 	// 相手方のPredecessorを自分のSuccessorとして追加する。
 	// CAUTION: 初期状態ではPred/SuccともにSelfを参照していることに留意されたし
 	// TODO:　異常ノードの切断処理を追加されたし
-	synchronized void stabilizeSuccessor() throws MalformedURLException {
-		//System.out.println("スタビライザ稼動");
-		/*
-		 * もしSuccessorがSelfの場合は処理を中断する
-		 */
-		if (chord.getInstance().succList.first().IDval.idVal == selfID.idVal) {
-			return;
-		}
-		/*
-		 * Successorが参照しているPredecessorを取得する
-		 */
-		// 1: 接続オブジェクトの作成
-		P2PClient cliSucc = new P2PClient(succList.first().getHostname(),
-				succList.first().getPort());
-		String[] param = new String[1];
-		param[0] = "";
-		// 2: Successorと接続し、データを取得する
-		idAddress hisPred; // maybe idAddress
+	synchronized void stabilizeSuccessor2() {
+		System.out.println("I am: " + self.getID().getBase64());
+		System.out.println("successor is: "
+				+ succManager.first().getID().getBase64());
+
+		boolean succliving = checkSuccLiving();
+		boolean presuccliving = checkPreSuccLiving();
+		boolean rightness = checkRightness();
+		boolean consistentness = checkConsistentness();
+
+		System.out.println("Consistentness: " + consistentness);
+		stabilizationStrategy strategy = null;
+		strategy = stabilizationStrategyFactory.createStrategy(succliving,
+				presuccliving, rightness, consistentness);
+		strategy.doStrategy();
+	}
+
+	private boolean checkSuccLiving() {
 		try {
-			hisPred = (idAddress) cliSucc
-					.execute("Node.yourPredecessor", param);
-
-			// System.out.println("SuccessorによるProdecessorを受信: "
-			// + hisPred.getID().getBase64());
-		} catch (XmlRpcException e) {
-			// 受信不可能の場合、代替ノードに接続を変更する。
-			// まずはsuccListを走査し、空ならばpredに接続し自然に回復させる。
-			// e.printStackTrace();
-			System.out.println("Successorに接続できません");
-			// succListの状態により処理を変更
-			System.out.println("Successorを破棄");
-			/*
-			 * succList.remove1st(); if (succList.isEmpty()) {
-			 * System.out.println("SuccessorをPredecessorに移行");
-			 * succList.add(predID, predAddress); }
-			 */
-			if (succList.count()>1) {
-				System.out.println(succList.second().hostval + ":" + succList.second().portval + "に再接続");
-				join(succList.second().getHostPair());
-			} else {
-				join(predAddress);
-			}
-			// ここで処理を中断する
-			return;
+			return succManager.first().getClient().checkLiving();
+		} catch (MalformedURLException e) {
+			// TODO 自動生成された catch ブロック
+			e.printStackTrace();
+			return false;
 		}
+	}
 
-		nodeID hisPredID = hisPred.getID();
-		nodeID mySuccID = succList.first().getID();
+	private boolean checkPreSuccLiving() {
+		try {
+			return succManager.second().getClient().checkLiving();
+		} catch (MalformedURLException e) {
+			// TODO 自動生成された catch ブロック
+			e.printStackTrace();
+			return false;
+		}
+	}
 
-		// System.out.println("HisPredのID: " + hisPredID.getBase64());
-		// System.out.println("SelfのID: " + selfID.getBase64());
+	private boolean checkPredLiving() {
+		try {
+			return pred.getClient().checkLiving();
+		} catch (MalformedURLException e) {
+			// TODO 自動生成された catch ブロック
+			e.printStackTrace();
+			return false;
+		}
+	}
 
-		if (hisPredID.getBase64().equals(selfID.getBase64())) {
-			// Successorの参照するPredecessorがSelfのIDと等しいとき（異常なし）
-			System.out.println("ルーティングテーブルに変更なし");
-			// return;
-		} else {
-			/*
-			 * Successorの参照するPredecessorとSelfのIDが違うとき
-			 * Successorが誤ったPredecessorを参照しているか、 Selfが誤ったSuccessorを参照している。
-			 */
-			// Successorから両ノードへの距離を測定する
-			BigInteger self_succ = nodeID.distance(mySuccID, selfID);
-			BigInteger succPred_succ = nodeID.distance(mySuccID, hisPredID);
-			if (self_succ.compareTo(succPred_succ) < 0
-					|| hisPredID.getBase64().equals(mySuccID.getBase64())) {
-				// SuccのPredよりも自分が近い,もしくは相手のPredは初期状態でPred自身を参照しているので更新させる
-				Object[] params = { new idAddress(selfID, selfHostName,
-						selfPort) };// new Object[2];
-				try {
-					cliSucc.execute("Node.amIPredecessor", params);
-				} catch (XmlRpcException e) {
-					e.printStackTrace();
-					return;
+	private boolean checkRightness() {
+		nodeID id_Succ = succManager.first().getID();
+		nodeID id_preSucc = null;
+		if (self.getID().equals(id_Succ)) {
+			return false; // 自分が孤独状態ならすぐに譲る
+		}
+		try {
+			idAddress preSucc = succManager.first().getClient()
+					.yourPredecessor();
+			if (preSucc == null) {
+				return true;
+			}
+			id_preSucc = preSucc.getID();
+		} catch (MalformedURLException e) {
+			// TODO 自動生成された catch ブロック
+			e.printStackTrace();
+			return false;
+		} catch (XmlRpcException e) {
+			// TODO 自動生成された catch ブロック
+			return false;
+		}
+		return nodeID.belongs(self.getID(), id_preSucc, id_Succ);
+	}
+
+	private boolean checkConsistentness() {
+		try {
+			idAddress preSucc = succManager.first().getClient()
+					.yourPredecessor();
+			if(preSucc == null) {
+				System.out.println("preSucc is null");
+				return false;
 				}
-			} else {
-				// 自分のSuccを換えるべき
-				System.out.println("Successorに変更:"
-						+ Base64.encode(hisPredID.getArray()));
-				succList.clear();
-				succList.add(hisPredID, hisPred.getHostname(),
-						hisPred.getPort());
-			}
-		}
-		/*
-		 * succListは常に3ノード確保する
-		 */
-		// if (succList.count() < 3) {
-//------		
-		System.out.println("\nSuccListの補完開始");
-		idAddress successor = succList.first();
-		System.out.println("1st: " + successor.IDval.getBase64() + " @ " + successor.hostval + ":" + successor.portval);
-		System.out.println("2nd: " + succList.second().IDval.getBase64() + " @ " + succList.second().hostval + ":" + succList.second().portval);
-
-		P2PClient cliSuccSucc = new P2PClient(succList.second().getHostname(),
-				succList.second().getPort());
-		Object[] nullParam = { null };
-		succList.clear();
-		succList.add(successor);
-
-		try {
-			succList.add((idAddress) cliSucc.execute("Node.yourSuccessor",
-					nullParam));
-		} catch (XmlRpcException e) {
+			System.out.println("presucc is: " + preSucc.getID().getBase64());
+			return self.getID().getBase64().equals(preSucc.getID().getBase64());
+		} catch (MalformedURLException | XmlRpcException e) {
 			// TODO 自動生成された catch ブロック
-			System.out.println(e.getMessage());
+			System.out.println("<<Consistent fail>>");
+			return false;
 		}
-		try {
-			succList.add((idAddress) cliSuccSucc.execute(
-					"Node.yourSuccessor", nullParam));
-		} catch (XmlRpcException e) {
-			// TODO 自動生成された catch ブロック
-			System.out.println(e.getMessage());
-		}
-//------
 	}
 
 	// }
@@ -226,12 +187,17 @@ public class chord {
 	// 自分のPredecessorと告知されたIDのどちらが正当（ほとんどの場合告知されたIDが正当）か確認する。
 	// 告知されたIDが距離的に近い場合、自分のPredecessorを破棄して告知されたIDに書き換える。
 	// このメソッドはNodeのamIPredeessorによって呼ばれる。また、amIPredecessorはchordのスタビライザが呼び出す。
-	/* synchronized */boolean checkPredecessor(idAddress saidIDAddress) {
+	boolean checkPredecessor(idAddress saidIDAddress) {
 		// このへん
-		System.out.println("Predecessorに変更: "
-				+ Base64.encode(saidIDAddress.getID().getArray()));
-		predID = saidIDAddress.getID();
-		predAddress = saidIDAddress.getHostPair();
+		if (saidIDAddress.getID().equals(self.getID())) {
+			return false;
+		}
+		if (pred == null
+				|| nodeID.belongs(saidIDAddress.getID(), pred.getID(),
+						self.getID()) || !checkPredLiving())
+			System.out.println("Predecessorに変更: "
+					+ Base64.encode(saidIDAddress.getID().getArray()));
+		pred = saidIDAddress;
 
 		return true;
 	}
@@ -254,20 +220,16 @@ public class chord {
 					.encode(meta.checksum_Chunk_SHA1[i]));
 			P2PClient cliNode = new P2PClient(addr.getHostname(),
 					addr.getPort());
-			byte[][] param = new byte[2][];
-			param[0] = meta.checksum_Chunk_SHA1[i];
-			param[1] = meta.chunks[i].getBytes();
-			cliNode.execute("Node.setChunk", param);
+			cliNode.execute("Node.setChunk", meta.checksum_Chunk_SHA1[i],
+					meta.chunks[i].getBytes());
 		}
 		Node nd = new Node();
 		MessageDigest md = MessageDigest.getInstance("SHA-1");
 		md.update(meta.toString().getBytes());
 		idAddress addr = nd.findNode(Base64.encode(md.digest()));
 		P2PClient cliNode = new P2PClient(addr.getHostname(), addr.getPort());
-		byte[][] param = new byte[2][];
-		param[0] = md.digest();
-		param[1] = meta.toString().getBytes();
-		cliNode.execute("Node.setChunk", param);
+		cliNode.execute("Node.setChunk", md.digest(), meta.toString()
+				.getBytes());
 		return md.digest();
 	}
 
@@ -276,9 +238,7 @@ public class chord {
 		Node nd = new Node();
 		idAddress addr = nd.findNode(Base64.encode(key));
 		P2PClient cliNode = new P2PClient(addr.getHostname(), addr.getPort());
-		byte[][] param = new byte[1][];
-		param[0] = key;
-		String meta = ((byte[]) cliNode.execute("Node.getChunk", param))
+		String meta = ((byte[]) cliNode.execute("Node.getChunk", key))
 				.toString();
 		if (meta == null)
 			return null;
@@ -298,9 +258,9 @@ public class chord {
 			;
 			addr = nd.findNode(Base64.encode(key));
 			cliNode = new P2PClient(addr.getHostname(), addr.getPort());
-			param = new byte[1][];
-			param[0] = chunks[i].getBytes();
-			data[i] = (byte[]) cliNode.execute("Node.getChunk", param);
+
+			data[i] = (byte[]) cliNode.execute("Node.getChunk",
+					chunks[i].getBytes());
 			if (data[i] == null)
 				return null;
 		}
@@ -316,5 +276,9 @@ public class chord {
 		}
 
 		return finalData;
+	}
+
+	idAddress getSelfIdAddress() {
+		return self.clone();
 	}
 }

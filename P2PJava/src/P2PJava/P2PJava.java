@@ -17,8 +17,9 @@ public class P2PJava {
 	 * @throws UnknownHostException 
 	 * @throws XmlRpcException 
 	 * @throws DecodingException 
+	 * @throws InterruptedException 
 	 */
-	public static void main(String[] args) throws MalformedURLException, NoSuchAlgorithmException, UnknownHostException, XmlRpcException, DecodingException {
+	public static void main(String[] args) throws MalformedURLException, NoSuchAlgorithmException, UnknownHostException, DecodingException, InterruptedException {
 		// TODO Auto-generated method stub
 		int serverport;
 		
@@ -35,19 +36,27 @@ public class P2PJava {
 		nodeID ID = new nodeID(md.digest());
 
 	    server.start();
+	    Thread.sleep(1000);
 	    chord.getInstance().init(ID, java.net.InetAddress.getLocalHost().getHostAddress(), serverport);
 
 	    // INITIALISATION END
 	    P2PClient clientone = new P2PClient("localhost", serverport); // 自分にping飛ばすため
-	    System.out.println("Hello,Scala!");
-	    String param[] = null;
-
+	    System.out.println("Hello, Java!");
 	    System.out.println("localhost ID:");
-	    //System.out.println(clientone.execute("Node.ping", param));
-	    System.out.println(clientone.execute("Node.ping", param));
+
+	    try {
+			System.out.println(clientone.execute("Node.ping"));
+		} catch (XmlRpcException e) {
+			System.err.println("ping failed: " + e.getMessage());
+		}
 	    if(args.length == 3){
 	    	// パラメータが3あればjoinしてみる
-	    	chord.getInstance().join(new hostPair(args[1], Integer.parseInt(args[2])));
+	    	try {
+				chord.getInstance().join(new hostPair(args[1], Integer.parseInt(args[2])));
+			} catch (NumberFormatException | XmlRpcException e) {
+				// TODO 自動生成された catch ブロック
+				System.err.println("接続に失敗しました");
+			}
 	    }
 	    
 	    Scanner in = new Scanner(System.in);
@@ -61,16 +70,30 @@ public class P2PJava {
 	    switch (arguments[0]) {
 	    case "find":
 	    	System.out.println("finding " + arguments[1]);
-	    	System.out.println(new Node().findNode(arguments[1]).IDval.getBase64());
+	    	try {
+				System.out.println(new Node().findNode(arguments[1]).IDval.getBase64());
+			} catch (XmlRpcException e) {
+				System.err.println("Find failed: " + e.getMessage());
+			}
 	    	break;
 	    case "save":
 	    	System.out.println("あなたは "+arguments[1]+" を入力しました。");
-		    System.out.println(Base64.encode(chord.getInstance().saveData("moko", arguments[1].getBytes())));
+		    try {
+				System.out.println(Base64.encode(chord.getInstance().saveData("moko", arguments[1].getBytes())));
+			} catch (XmlRpcException e) {
+				System.err.println("Save failed: " + e.getMessage());
+			}
 		    break;
 	    case "load":
 	    	System.out.println(arguments[1]+" をロードします。");
-		    String responseStr = new String(chord.getInstance().loadData(Base64.decode(arguments[1])));
-		    System.out.println(responseStr);
+		    String responseStr;
+			try {
+				responseStr = new String(chord.getInstance().loadData(Base64.decode(arguments[1])));
+				System.out.println(responseStr);
+			} catch (XmlRpcException e) {
+				System.err.println("Load faield: " + e.getMessage());
+			}
+		    
 		    break;
 	    }
 	    
